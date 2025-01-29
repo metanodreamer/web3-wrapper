@@ -141,6 +141,77 @@ class EthereumAccount:
     def set_sender_for(self, contract):
         contract.signer = self
 
+    async def get_token_balance(self, token_address):
+        """Get ERC20 token balance for this account"""
+        if not await self.is_contract(token_address):
+            raise ValueError("Provided address is not a contract")
+
+        # ERC20 balanceOf function signature
+        data = bytes.fromhex("70a08231" + "0" * 24 + self.address[2:])
+
+        result = await self._connection.call({"to": token_address, "data": data})
+        return int(result, 16)
+
+    async def transfer_token(self, token_address, to_address, amount, gas_price=None):
+        """Transfer ERC20 tokens to another address"""
+        if not is_checksum_address(to_address):
+            raise ValueError("Invalid recipient address")
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
+
+        # ERC20 transfer function signature
+        data = (
+            bytes.fromhex("a9059cbb")  # transfer method ID
+            + bytes.fromhex("0" * 24 + to_address[2:])  # padding + address
+            + amount.to_bytes(32, "big")  # amount in bytes
+        )
+
+        tx_data = {"to": token_address, "data": data, "value": 0}
+
+        if gas_price:
+            tx_data["gasPrice"] = gas_price
+
+        return await self.send_transaction(tx_data)
+
+    async def get_transaction_history(self, start_block=0, end_block="latest"):
+        """Get all transactions involving this account"""
+        # Get sent transactions
+        sent_filter = {
+            "fromBlock": start_block,
+            "toBlock": end_block,
+            "address": self.address,
+        }
+
+        # Get received transactions
+        received_filter = {
+            "fromBlock": start_block,
+            "toBlock": end_block,
+            "to": self.address,
+        }
+
+        sent = await self._connection.get_logs(sent_filter)
+        received = await self._connection.get_logs(received_filter)
+
+        return {"sent": sent, "received": received}
+
+    async def approve_token_spending(self, token_address, spender_address, amount):
+        """Approve an address to spend tokens on behalf of this account"""
+        if not is_checksum_address(spender_address):
+            raise ValueError("Invalid spender address")
+        if amount < 0:
+            raise ValueError("Amount must be non-negative")
+
+        # ERC20 approve function signature
+        data = (
+            bytes.fromhex("095ea7b3")  # approve method ID
+            + bytes.fromhex("0" * 24 + spender_address[2:])  # padding + address
+            + amount.to_bytes(32, "big")  # amount in bytes
+        )
+
+        return await self.send_transaction(
+            {"to": token_address, "data": data, "value": 0}
+        )
+
 
 secp256k1 = None
 
